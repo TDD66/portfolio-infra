@@ -2,6 +2,7 @@ name: Terraform
 
 # Plan on every PR; auto-apply when changes land on main.
 on:
+  workflow_dispatch: {}
   pull_request:
     paths:
       - "**.tf"
