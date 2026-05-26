@@ -1,0 +1,16 @@
+*.tfstate
+*.tfstate.*
+.terraform.tfstate.lock.info
+
+.terraform/
+
+*.tfvars
+*.tfvars.json
+!example.tfvars
+
+crash.log
+crash.*.log
+
+.claude/settings.local.json
+
+.DS_Store

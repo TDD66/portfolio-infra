@@ -1,0 +1,108 @@
+name: Terraform
+
+# Plan on every PR; auto-apply when changes land on main.
+on:
+  pull_request:
+    paths:
+      - "**.tf"
+      - ".terraform.lock.hcl"
+      - ".github/workflows/terraform.yml"
+  push:
+    branches: [main]
+    paths:
+      - "**.tf"
+      - ".terraform.lock.hcl"
+      - ".github/workflows/terraform.yml"
+
+# Keyless auth to GCP via Workload Identity Federation needs id-token.
+# pull-requests: write lets us post the plan as a PR comment.
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+# Never run two applies against the same state at once.
+concurrency:
+  group: terraform-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  TF_IN_AUTOMATION: "true"
+  # Non-secret WIF identifiers — access is locked to this repo by the WIF binding.
+  GCP_PROJECT: portfolio-497109
+  WIF_PROVIDER: projects/344446164530/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+  SERVICE_ACCOUNT: github-actions-tf@portfolio-497109.iam.gserviceaccount.com
+
+jobs:
+  terraform:
+    name: fmt / validate / plan / apply
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT }}
+          workload_identity_provider: ${{ env.WIF_PROVIDER }}
+          service_account: ${{ env.SERVICE_ACCOUNT }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.15.4"
+
+      - name: Terraform fmt
+        id: fmt
+        run: terraform fmt -check -diff
+        continue-on-error: true
+
+      - name: Terraform init
+        run: terraform init -input=false
+
+      - name: Terraform validate
+        id: validate
+        run: terraform validate -no-color
+
+      - name: Terraform plan
+        id: plan
+        run: terraform plan -input=false -no-color -out=tfplan
+        continue-on-error: true
+
+      - name: Comment plan on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        env:
+          PLAN: ${{ steps.plan.outputs.stdout }}
+        with:
+          script: |
+            const plan = (process.env.PLAN || '').slice(0, 60000);
+            const body = `#### Terraform \`fmt\` 🖌 \`${{ steps.fmt.outcome }}\`
+            #### Terraform \`validate\` 🤖 \`${{ steps.validate.outcome }}\`
+            #### Terraform \`plan\` 📖 \`${{ steps.plan.outcome }}\`
+
+            <details><summary>Show plan</summary>
+
+            \`\`\`terraform
+            ${plan}
+            \`\`\`
+
+            </details>
+
+            *Pushed by @${{ github.actor }}, commit \`${{ github.sha }}\`*`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });
+
+      - name: Fail if plan errored
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
+
+      # Auto-apply only on push to main (i.e. after a PR merge).
+      - name: Terraform apply
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: terraform apply -input=false -auto-approve tfplan
