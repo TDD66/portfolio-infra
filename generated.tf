@@ -234,7 +234,7 @@ resource "google_storage_bucket" "site" {
   enable_object_retention     = false
   force_destroy               = false
   labels                      = {}
-  location                    = "EU"
+  location                    = "europe-west2"
   name                        = "my-portfolio-66"
   project                     = "portfolio-497109"
   public_access_prevention    = "inherited"
